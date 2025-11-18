@@ -1,0 +1,34 @@
+OTIF 
+
+= Table.AddColumn(#"PREVIOUS NAME OF STEP", 
+"OTIF Global",
+each
+    if 
+        Text.StartsWith(Text.From([pliPO]), "21")
+        and not Text.StartsWith(Text.From([pliPO]), "214")
+        and not Text.StartsWith(Text.From([pliPO]), "211")
+        and not (
+            Text.StartsWith(Text.Upper([pliItem]), "C")
+            or Text.StartsWith(Text.From([pliItem]), "510")
+        )
+    then
+let
+    plannedETA     = [#"Confirmed / Planned ETA"],
+    actualDate     = [pliActualReceiptDate],
+    isFriday       = Date.DayOfWeek(plannedETA, Day.Sunday) = 5,
+    nextMonday     = Date.AddDays(plannedETA, 3),
+    earliestAllowed = Date.AddDays(plannedETA, -14),
+    latestAllowed  = Date.AddDays(plannedETA, 4),
+    withinNormalRange = actualDate >= earliestAllowed and actualDate <= latestAllowed,
+    withinFridayException = isFriday and actualDate = nextMonday
+in
+    if (withinNormalRange or withinFridayException) then 1 else 0
+
+    else
+        null
+)
+--------------------------
+Założenia:
+>> wymaga jednocześnie, by actualDate była >= plannedETA-14 i <= plannedETA+4,
+>> dopuszcza dodatkowo przypadek ETA w piątek z dostawą dokładnie w poniedziałek (ETA+3),
+>> wykluczenia numerów zamówień poszczególnych oraz itemów typu freight oraz cost genow
