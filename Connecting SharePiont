@@ -1,0 +1,88 @@
+let
+    // --- Wymuszenie SharePoint jako źródła ---
+    Dummy = SharePoint.Contents("https://support.ltg-emea.com"),
+
+    // --- Konfiguracja ---
+    BaseUrl = "https://support.ltg-emea.com",
+    ListName = "Tickets",
+    FilterDate = "2024-01-01T00:00:00Z",
+
+    // Funkcja: wyciąga RelativePath z pełnego URL
+    ToRelative = (fullUrl as text) as text =>
+        let
+            pos = Text.PositionOf(fullUrl, "/_api"),
+            rel = Text.Range(fullUrl, pos + 1)
+        in
+            rel,
+
+    // Pobranie jednej strony
+    GetPage = (relativePath as text) as record =>
+        Json.Document(
+            Web.Contents(
+                BaseUrl,
+                [
+                    RelativePath = relativePath,
+                    Headers = [Accept="application/json;odata=minimalmetadata"]
+                ]
+            )
+        ),
+
+    // Pierwsza strona
+    FirstRelative =
+        "_api/web/lists/getbytitle('" &
+        ListName &
+        "')/items?$top=5000&$filter=Created ge datetime'" &
+        FilterDate &
+        "'",
+
+    FirstPage = GetPage(FirstRelative),
+
+    // Paginacja
+    Pages =
+        List.Generate(
+            () => FirstPage,
+            each _ <> null and Record.HasFields(_, "value"),
+            each
+                if Record.HasFields(_, "odata.nextLink") then
+                    GetPage(ToRelative(_[odata.nextLink]))
+                else
+                    null
+        ),
+
+    PagesClean = List.RemoveNulls(Pages),
+    Values = List.Transform(PagesClean, each _[value]),
+    Combined = List.Combine(Values),
+
+    // Automatyczne tworzenie tabeli z rekordów
+    Table = Table.FromRecords(Combined),
+
+    // Obsługa null w TickXPriority
+    Safe =
+        Table.TransformColumns(
+            Table,
+            {
+                "TickXPriority",
+                each if _ = null then [Key=null, Value=null] else _
+            }
+        ),
+
+    // Rozwinięcie TickXPriority
+    #"Expanded TickXPriority" =
+        Table.ExpandRecordColumn(
+            Safe,
+            "TickXPriority",
+            {"Key","Value"},
+            {"TickXPriority.Key","TickXPriority.Value"}
+        ),
+
+    // Sortowanie
+    #"Sorted Rows" = Table.Sort(#"Expanded TickXPriority",{{"Created", Order.Descending}}),
+
+    // --- WYBÓR TYLKO 4 KOLUMN ---
+    Final =
+        Table.SelectColumns(
+            #"Sorted Rows",
+            {"Id", "TickXPriority.Key", "TickXPriority.Value", "Created"}
+        )
+in
+    Final
